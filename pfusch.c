@@ -1,12 +1,16 @@
 // Benjamin Eder, 210894
 
+#include <fcntl.h>
 #include <getopt.h>
+#include <mqueue.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <threads.h>
 #include <unistd.h>
 
 struct CliArgs {
@@ -51,15 +55,38 @@ CliArgs parse_cli_args(int argc, char* argv[]) {
     return args;
 }
 
+struct work_msg {
+    int work;
+};
+
 int child_labour() {
-    // DO SOME WORK
+    mqd_t command_queue = mq_open("/mq_210894", O_RDONLY);
+    printf("[%d] mq_open returned %d\n", getpid(), command_queue);
+    if (command_queue == -1) {
+        fprintf(stderr, "Failed to open msg queue\n");
+        return EXIT_FAILURE;
+    }
+
+    printf("[%d] Waiting for instructions\n", getpid());
+    struct work_msg instructions;
+    int received = mq_receive(command_queue, (void*)&instructions,
+                              sizeof(struct work_msg), NULL);
+    if (received == -1) {
+        fprintf(stderr, "Failed to reveice instructions\n");
+        return EXIT_FAILURE;
+    }
+
+    printf("[%d] Received msg of size %ld bytes: work to do %d\n", getpid(),
+           sizeof(instructions), instructions.work);
+
     printf("[%d] Doing some work for (%d)...\n", getpid(), getppid());
 
-    srand(getpid());
-    sleep(rand() % 5);
+    sleep(instructions.work);
 
     printf("[%d] Job's done!\n", getpid());
     printf("[%d] Bringing coal to %d...\n", getpid(), getppid());
+
+    mq_close(command_queue);
 
     return getpid();
 }
@@ -68,19 +95,45 @@ int main(int argc, char* argv[]) {
     // CliArgs const args = parse_cli_args(argc, argv);
     // printf("i: %d, s: %s, b: %i\n", args.i, args.s, args.b);
 
+    const int CHILD_COUNT = 10;
+
+    struct mq_attr queue_options = {.mq_maxmsg = 1,
+                                    .mq_msgsize = sizeof(struct work_msg)};
+    mqd_t command_queue =
+        mq_open("/mq_210894", O_WRONLY | O_CREAT, S_IRWXU, &queue_options);
+
+    printf("[%d] mq_open returned %d\n", getpid(), command_queue);
+    if (command_queue == -1) {
+        printf("Failed to open msg queue!\n");
+        return EXIT_FAILURE;
+    }
+
     printf("[%d] Sending a child into the mines...\n", getpid());
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < CHILD_COUNT; i++) {
         pid_t forked = fork();
         if (forked == 0) {
             return child_labour();
         }
     }
 
+    for (int i = 0; i < CHILD_COUNT; i++) {
+        // send instructions to children
+        struct work_msg instructions = {3 + rand() % 7};
+        int sent = mq_send(command_queue, (void*)&instructions,
+                           sizeof(instructions), 0);
+        if (sent == -1) {
+            fprintf(stderr, "Failed to send instructions\n");
+            return EXIT_FAILURE;
+        }
+    }
+
+    printf("[%d] Successfully sent instructions to child\n", getpid());
+
     printf("[%d] Enjoying some brandy...\n", getpid());
     printf("[%d] Where the fudge is my coal???\n", getpid());
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < CHILD_COUNT; i++) {
         int wstatus = 0;
         pid_t const waited = wait(&wstatus);
 
@@ -100,5 +153,7 @@ int main(int argc, char* argv[]) {
 
     printf("All children have returned\n");
 
+    mq_close(command_queue);
+    mq_unlink("/mq_210894");
     return 0;
 }
