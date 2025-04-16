@@ -14,13 +14,16 @@ project(
   VERSION 1.0
   LANGUAGES C)
 
-#add_library(BST bst.c bst.h)
+set(CMAKE_C_COMPILER "/usr/bin/clang")
+
+add_library(Log log.c log.h)
+add_library(Worker worker.c worker.h)
+add_library(CliArgs cli_args.c cli_args.h)
 
 # Link each target with other targets or add options, etc.
 
-add_executable(Main pfusch.c)
-#target_link_libraries(Main 
-#                       PRIVATE BST)
+add_executable(Ventilator ventilator.c)
+target_link_libraries(Ventilator PRIVATE Log PRIVATE Worker PRIVATE CliArgs)
                        
-set_property(TARGET Main PROPERTY C_STANDARD 17)
-set_target_properties(Main PROPERTIES OUTPUT_NAME "pfusch.out")
+set_property(TARGET Ventilator PROPERTY C_STANDARD 17)
+set_target_properties(Ventilator PROPERTIES OUTPUT_NAME "ventilator.out")
